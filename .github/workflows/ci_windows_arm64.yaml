@@ -1,0 +1,151 @@
+name: Build for Windows ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+    - '*'
+
+jobs:
+  build-windows-arm64:
+    name: Build
+    runs-on: windows-latest
+    env:
+      qt_version: "6.6.1"
+      qt_path: "${{ github.workspace }}/qt-msvc-arm64"
+      transmission_version: "4.0.4"
+      transmission_path: "${{ github.workspace }}/transmission-windows-arm64"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup devcmd
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+
+      - name: Fetch transmission source
+        run: |
+          aria2c https://github.com/transmission/transmission/releases/download/${{ env.transmission_version }}/transmission-${{ env.transmission_version }}.tar.xz
+          7z x transmission-${{ env.transmission_version }}.tar.xz
+          7z x transmission-${{ env.transmission_version }}.tar
+          
+      # use the preinstalled vcpkg from image
+      # https://github.com/actions/virtual-environments/blob/main/images/win/Windows2019-Readme.md#package-management
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v10
+        with:
+          vcpkgDirectory: C:/vcpkg
+          doNotUpdateVcpkg: true  # the preinstalled vcpkg is updated regularly
+
+      - name: Install dependencies from vcpkg
+        run: |
+          # tell vcpkg to only build Release variants of the dependencies
+          New-Item `
+            -Path "${{ github.workspace }}" `
+            -Name "triplets_overlay" `
+            -ItemType Directory
+          Copy-Item `
+            "${{ env.RUNVCPKG_VCPKG_ROOT }}/triplets/arm64-windows.cmake" `
+            "${{ github.workspace }}/triplets_overlay/arm64-windows-release.cmake"
+          Add-Content `
+            "${{ github.workspace }}/triplets_overlay/arm64-windows-release.cmake" `
+            -Value "set(VCPKG_BUILD_TYPE release)"
+          # clear buildtrees after each package installation to reduce disk space requirements
+          $packages = `
+            "zlib:arm64-windows-release",
+            "curl:arm64-windows-release",
+            "openssl:arm64-windows-release"
+          ${{ env.RUNVCPKG_VCPKG_ROOT }}/vcpkg.exe upgrade `
+            --overlay-triplets="${{ github.workspace }}/triplets_overlay" `
+            --no-dry-run
+          ${{ env.RUNVCPKG_VCPKG_ROOT }}/vcpkg.exe install `
+            --overlay-triplets="${{ github.workspace }}/triplets_overlay" `
+            --clean-after-build `
+            $packages
+
+      - name: Install Qt (host x64)
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: "${{ env.qt_version }}"
+          archives: 'qtbase qttools qttranslations'
+          set-env: 'false'
+          dir: 'C:'
+
+      - name: Install Qt (target arm64)
+        run: |
+          git clone https://github.com/qt/qt5.git qt6
+          cd qt6
+          git checkout "v${{ env.qt_version }}"
+          perl init-repository --module-subset=qtbase,qttools,qttranslations,qtsvg,qtimageformats
+          ./configure -opensource -confirm-license -nomake tests -nomake examples `
+            -release -xplatform win32-arm64-msvc `
+            -prefix "${{ env.qt_path }}" -qt-host-path "C:/Qt/${{ env.qt_version }}/msvc2019_64" `
+            -system-zlib -schannel -no-sql-sqlite -no-sql-mysql -no-sql-odbc -no-sql-psql -- -DCMAKE_TOOLCHAIN_FILE="${{ env.RUNVCPKG_VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=arm64-windows-release
+          cmake --build .
+          cmake --install .
+          
+      - name: Install transmission
+        run: |
+          $env:path = "${{ env.qt_path }}/bin;$env:path"
+          cd transmission-${{ env.transmission_version }}
+          cmake `
+            -B build `
+            -G "Ninja" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DENABLE_DAEMON=ON `
+            -DENABLE_QT=ON `
+            -DENABLE_UTILS=ON `
+            -DENABLE_CLI=ON `
+            -DENABLE_TESTS=OFF `
+            -DUSE_QT_VERSION=6 `
+            -DCMAKE_INSTALL_PREFIX="${{ env.transmission_path }}" `
+            -DCMAKE_TOOLCHAIN_FILE="${{ env.RUNVCPKG_VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=arm64-windows-release `
+            -DQt6LinguistTools_DIR="C:/Qt/${{ env.qt_version }}/msvc2019_64/lib/cmake/Qt6LinguistTools" 
+          cmake --build build
+          cmake --install build 
+
+      - name: Prepare build artifacts
+        run: |
+          mkdir upload
+          copy ${{ env.transmission_path }}/bin/*.exe upload
+          copy -r ${{ env.transmission_path }}/share/transmission/public_html upload
+          copy -r ${{ env.transmission_path }}/share/transmission/translations upload
+          # copy Qt dlls
+          ls ${{ env.qt_path }}/bin
+          copy ${{ env.qt_path }}/bin/Qt6Core.dll upload
+          copy ${{ env.qt_path }}/bin/Qt6DBus.dll upload
+          copy ${{ env.qt_path }}/bin/Qt6Gui.dll upload
+          copy ${{ env.qt_path }}/bin/Qt6Network.dll upload
+          copy ${{ env.qt_path }}/bin/Qt6Svg.dll upload
+          copy ${{ env.qt_path }}/bin/Qt6Widgets.dll upload
+          copy -r ${{ env.qt_path }}/plugins/iconengines upload
+          copy -r ${{ env.qt_path }}/plugins/platforms upload
+          copy -r ${{ env.qt_path }}/plugins/styles upload
+          copy -r ${{ env.qt_path }}/plugins/imageformats upload
+          copy -r ${{ env.qt_path }}/plugins/tls upload
+          # copy curl/zlib/openssl dlls
+          copy ${{ env.RUNVCPKG_VCPKG_ROOT }}/installed/arm64-windows-release/bin/zlib*.dll upload
+          copy ${{ env.RUNVCPKG_VCPKG_ROOT }}/installed/arm64-windows-release/bin/libcurl*.dll upload
+          copy ${{ env.RUNVCPKG_VCPKG_ROOT }}/installed/arm64-windows-release/bin/libcrypto*.dll upload
+          copy ${{ env.RUNVCPKG_VCPKG_ROOT }}/installed/arm64-windows-release/bin/libssl*.dll upload
+          cd upload
+          7z a -mx9 transmission_${{ env.transmission_version }}_arm64.zip *
+          mv transmission_${{ env.transmission_version }}_arm64.zip ..
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: transmission_${{ env.transmission_version }}_arm64
+          path: transmission_${{ env.transmission_version }}_arm64.zip
+
+      - name: Batch release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: transmission_${{ env.transmission_version }}_arm64.zip
