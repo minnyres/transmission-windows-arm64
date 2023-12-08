@@ -13,7 +13,7 @@ jobs:
     env:
       qt_version: "6.6.1"
       qt_path: "${{ github.workspace }}/qt-msvc-arm64"
-      transmission_version: "4.0.4"
+      transmission_version: "4.0.5"
       transmission_path: "${{ github.workspace }}/transmission-windows-arm64"
 
     steps:
