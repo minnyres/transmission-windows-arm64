@@ -11,9 +11,9 @@ jobs:
     name: Build
     runs-on: windows-latest
     env:
-      qt_version: "6.6.1"
+      qt_version: "6.7.1"
       qt_path: "${{ github.workspace }}/qt-msvc-arm64"
-      transmission_version: "4.0.5"
+      transmission_version: "4.0.6"
       transmission_path: "${{ github.workspace }}/transmission-windows-arm64"
 
     steps:
