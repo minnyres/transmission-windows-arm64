@@ -1,10 +1,7 @@
 name: Build for Windows ARM64
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-    - '*'
 
 jobs:
   build-windows-arm64:
@@ -24,12 +21,6 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64_arm64
-
-      - name: Fetch transmission source
-        run: |
-          aria2c https://github.com/transmission/transmission/releases/download/${{ env.transmission_version }}/transmission-${{ env.transmission_version }}.tar.xz
-          7z x transmission-${{ env.transmission_version }}.tar.xz
-          7z x transmission-${{ env.transmission_version }}.tar
           
       # use the preinstalled vcpkg from image
       # https://github.com/actions/virtual-environments/blob/main/images/win/Windows2019-Readme.md#package-management
@@ -90,7 +81,8 @@ jobs:
       - name: Install transmission
         run: |
           $env:path = "${{ env.qt_path }}/bin;$env:path"
-          cd transmission-${{ env.transmission_version }}
+          git clone --depth 1 --branch ${{ env.transmission_version }} --recurse-submodules https://github.com/transmission/transmission.git
+          cd transmission
           cmake `
             -B build `
             -G "Ninja" `
