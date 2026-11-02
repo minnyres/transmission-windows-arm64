@@ -17,6 +17,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Install Qt (host x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          aqtversion: '==3.3.*'
+          version: '${{ env.qt_version }}'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtactiveqt qtshadertools'
+          dir: 'C:'
+
       - name: Setup devcmd
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -54,17 +65,6 @@ jobs:
             --overlay-triplets="${{ github.workspace }}/triplets_overlay" `
             --clean-after-build `
             $packages
-
-      - name: Install Qt (host x64)
-        uses: jurplel/install-qt-action@v4
-        with:
-          aqtversion: '==3.3.*'
-          version: '${{ env.qt_version }}'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_msvc2022_64'
-          modules: 'qtactiveqt qtshadertools'
-          dir: 'C:'
 
       - name: Install Qt (target arm64)
         run: |
